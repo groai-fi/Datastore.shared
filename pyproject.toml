@@ -1,0 +1,17 @@
+[project]
+name = "groai-fi-datastore-shared"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Hamilton", email = "hamilton@aiart.io" }
+]
+requires-python = ">=3.8"
+dependencies = []
+
+[project.scripts]
+groai-fi-datastore-shared = "groai_fi_datastore_shared:main"
+
+[build-system]
+requires = ["uv_build>=0.11.6,<0.12.0"]
+build-backend = "uv_build"
