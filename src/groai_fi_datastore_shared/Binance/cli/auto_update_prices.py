@@ -1,30 +1,43 @@
 """
 Auto update prices for all symbols
 
-Usage:
-    python auto_update_prices.py
+Usage (installed CLI):
+    binance-auto-update --exchange Binance --path /data/prices_v3.parquet
+
+Usage (direct):
+    python -m groai_fi_datastore_shared.Binance.cli.auto_update_prices --exchange Binance --path /data/...
 """
-import os
 import sys
+import argparse
+import os
 import pandas as pd
 import datetime as dt
 from pathlib import Path
 from datetime import datetime, timedelta
 
-# Add parent directory to path for imports
-SCRIPT_DIR = Path(__file__).resolve().parent
-BINANCE_DIR = SCRIPT_DIR.parent
-PROJECT_ROOT = BINANCE_DIR.parent.parent
-sys.path.insert(0, str(BINANCE_DIR.parent))
+# Import from installed package
+from groai_fi_datastore_shared.Binance import BinanceMarketDataDownloader, helper
+from groai_fi_datastore_shared.Binance.utils import setup_logger, readable_error
+from groai_fi_datastore_shared.Binance.cli.shared import copy_dir
 
-# Import Binance modules
-from Binance import BinanceMarketDataDownloader, helper
-from Binance.utils import setup_logger, get_project_root, readable_error
 
-# Configuration
-APP_DATA_DIR = PROJECT_ROOT / "appData"
-PRICES_DIR = APP_DATA_DIR / "trainData_crypto" / "prices_v3.parquet"
-EXCHANGE_DIR = PRICES_DIR / "exchange=Binance"
+def parse_arguments():
+    parser = argparse.ArgumentParser(
+        description='Auto update Binance price data for all discovered symbols'
+    )
+    parser.add_argument(
+        '--exchange', type=str, required=False, default='Binance',
+        help='Exchange name (default: Binance)'
+    )
+    parser.add_argument(
+        '--path', type=str, required=True,
+        help='Absolute path to the price root directory, e.g. /data/prices_v3.parquet'
+    )
+    parser.add_argument(
+        '--tframe', type=str, default='1m',
+        help='Kline timeframe (default: 1m)'
+    )
+    return parser.parse_args()
 
 
 def get_last_date(symbol_path):
@@ -50,7 +63,7 @@ def get_last_date(symbol_path):
 
         if df.empty:
             return None
-        
+
         # Assume index is date or 'date' column exists 
         if 'date' in df.columns:
             last_date = df['date'].max()
@@ -59,26 +72,26 @@ def get_last_date(symbol_path):
         else:
             print(f"Warning: Could not determine date column for {symbol_path}")
             return None
-            
+
         return last_date
     except Exception as e:
         print(f"Error reading parquet {symbol_path}: {e}")
         return None
 
 
-def download_symbol(symbol, start_date, logger):
+def download_symbol(symbol, start_date, price_root, tframe, logger):
     """Download price data for a symbol"""
     try:
         print(f"  Downloading from {start_date.strftime('%Y/%m/%d')}...")
-        
+
         result = BinanceMarketDataDownloader.catchup_price_binance(
             symbol=symbol,
-            kline_tframe="1m",
+            kline_tframe=tframe,
             default_download_start_date=start_date,
-            price_root_dir="appData/trainData_crypto/prices_v3.parquet",
+            price_root_dir=price_root,
             logger=logger
         )
-        
+
         return result is not None
     except Exception as e:
         err = readable_error(e, __file__)
@@ -87,58 +100,56 @@ def download_symbol(symbol, start_date, logger):
         return False
 
 
-def merge_symbol(symbol, logger):
+def merge_symbol(symbol, exchange, price_root, logger):
     """Merge and compact price data for a symbol"""
     try:
-        print(f"  Merging and compacting...")
-        
-        price_dir = f"{get_project_root()}/appData/trainData_crypto/prices_v3.parquet"
-        price_dir_full = f"{price_dir}/exchange=Binance/symbol={symbol}"
-        
+        print("  Merging and compacting...")
+
+        price_dir_full = f"{price_root}/exchange={exchange}/symbol={symbol}"
+
         # Backup
         now_str = dt.datetime.now().strftime('%Y%m%dT%H%M%S')
         backup_dir = f"{price_dir_full}_{now_str}"
-        
+
         # Load prices
         price_dd = helper.load_base_price(
-            exchange="Binance",
+            exchange=exchange,
             symbol=symbol,
-            price_data_path=price_dir,
+            price_data_path=price_root,
             interval_base="1m",
             cols=None,
             index=False
         )
-        
+
         if price_dd is None:
             logger.error(f"Failed to load price data for {symbol}")
             return False
-        
+
         # Backup
-        from shared import copy_dir
         try:
             copy_dir(price_dir_full, backup_dir, logger)
             logger.info(f'Backup to {backup_dir}')
         except Exception as e:
             err = readable_error(e, __file__)
             logger.warning(f'Backup failed: {err}')
-        
+
         # Compute to pandas
         price_pd = price_dd.compute()
-        
+
         # Reset index if needed
         if price_pd.index.name in [None, '__null_dask_index__']:
             price_pd = price_pd.reset_index(drop=True)
-        
+
         # Ensure required columns
         if 'exchange' not in price_pd.columns:
-            price_pd['exchange'] = "Binance"
+            price_pd['exchange'] = exchange
         if 'symbol' not in price_pd.columns:
             price_pd['symbol'] = symbol
-        
+
         # Set date as index
         if 'date' in price_pd.columns and price_pd.index.name != 'date':
             price_pd.set_index('date', inplace=True)
-        
+
         # Save merged
         helper.save_price_parquet(
             price_pd,
@@ -147,10 +158,10 @@ def merge_symbol(symbol, logger):
             overwrite=True,
             n_partitions=10
         )
-        
+
         logger.info(f'Successfully saved merged data to {price_dir_full}')
         return True
-        
+
     except Exception as e:
         err = readable_error(e, __file__)
         logger.error(f"Merge failed for {symbol}: {err}")
@@ -158,18 +169,14 @@ def merge_symbol(symbol, logger):
         return False
 
 
-def get_earliest_date(symbol, logger):
+def get_earliest_date(symbol, tframe, logger):
     """Get the earliest available date for a symbol from Binance API"""
     try:
         from binance.client import Client
-        import os
-        
-        # Initialize client
+
         client = Client(os.getenv("BINANCE_API_KEY"), os.getenv("BINANCE_API_SECRET"), testnet=False)
-        
-        # Get first candle
-        first_candle = client.get_klines(symbol=symbol, interval='1m', startTime=0, limit=1)
-        
+        first_candle = client.get_klines(symbol=symbol, interval=tframe, startTime=0, limit=1)
+
         if first_candle and len(first_candle) > 0:
             # First element is open time in milliseconds
             first_timestamp_ms = first_candle[0][0]
@@ -179,54 +186,57 @@ def get_earliest_date(symbol, logger):
         else:
             logger.warning(f"No candles found for {symbol}, using default date")
             return datetime(2013, 1, 1)
-            
+
     except Exception as e:
         logger.warning(f"Failed to fetch earliest timestamp for {symbol}: {e}. Using default date.")
         return datetime(2013, 1, 1)
 
 
 def main():
-    """Main entry point"""
-    if not EXCHANGE_DIR.exists():
-        print(f"Error: Exchange directory not found at {EXCHANGE_DIR}")
-        return
+    """Main entry point (registered as `binance-auto-update` CLI)"""
+    args = parse_arguments()
+    exchange = args.exchange
+    price_root = args.path
+    tframe = args.tframe
+    exchange_dir = Path(price_root) / f"exchange={exchange}"
+
+    if not exchange_dir.exists():
+        print(f"Error: Exchange directory not found at {exchange_dir}")
+        sys.exit(1)
 
     # 1. Discover Symbols
     discovered_symbols = []
-    if EXCHANGE_DIR.exists():
-        for symbol_dir in EXCHANGE_DIR.iterdir():
-            if symbol_dir.is_dir() and symbol_dir.name.startswith("symbol="):
-                symbol = symbol_dir.name.replace("symbol=", "")
-                discovered_symbols.append(symbol)
+    for symbol_dir in exchange_dir.iterdir():
+        if symbol_dir.is_dir() and symbol_dir.name.startswith("symbol="):
+            symbol = symbol_dir.name.replace("symbol=", "")
+            discovered_symbols.append(symbol)
 
     if not discovered_symbols:
         print("No symbols found in exchange directory")
-        return
+        sys.exit(0)
 
-    print(f"Found {len(discovered_symbols)} symbols: {', '.join(discovered_symbols[:10])}...")
+    print(f"Found {len(discovered_symbols)} symbols: {', '.join(discovered_symbols[:10])}")
     if len(discovered_symbols) > 10:
         print(f"  ... and {len(discovered_symbols) - 10} more")
 
     # 2. Process each symbol
     success_count = 0
     fail_count = 0
-    
+
     for symbol in discovered_symbols:
         print(f"\n{'='*60}")
         print(f"Processing {symbol}")
         print(f"{'='*60}")
 
-        # Setup logger for this symbol
         logger = setup_logger('auto_update_prices.log', symbol)
-        
-        symbol_path = EXCHANGE_DIR / f"symbol={symbol}"
-        
+        symbol_path = exchange_dir / f"symbol={symbol}"
+
         # Get last date
         last_date = get_last_date(symbol_path)
-        
+
         if last_date is None:
             print(f"Could not determine last date for {symbol}, fetching earliest from Binance API...")
-            start_date = get_earliest_date(symbol, logger)
+            start_date = get_earliest_date(symbol, tframe, logger)
             print(f"Starting from earliest available: {start_date.strftime('%Y/%m/%d')}")
         else:
             # Add 1 day to last date
@@ -235,7 +245,7 @@ def main():
             print(f"Last date: {last_date}, starting from: {start_date.strftime('%Y/%m/%d')}")
 
         # 3. Download
-        if not download_symbol(symbol, start_date, logger):
+        if not download_symbol(symbol, start_date, price_root, tframe, logger):
             print(f"✗ Download failed for {symbol}, skipping merge")
             fail_count += 1
             continue
@@ -243,7 +253,7 @@ def main():
         # 4. Merge if too many parquet files
         num_parquets = len(list(symbol_path.glob("part.*.parquet")))
         if num_parquets > 50:
-            if not merge_symbol(symbol, logger):
+            if not merge_symbol(symbol, exchange, price_root, logger):
                 print(f"✗ Merge failed for {symbol}")
                 fail_count += 1
                 continue
@@ -256,8 +266,8 @@ def main():
     print(f"\n{'='*60}")
     print(f"Auto update completed!")
     print(f"  Success: {success_count}")
-    print(f"  Failed: {fail_count}")
-    print(f"  Total: {len(discovered_symbols)}")
+    print(f"  Failed:  {fail_count}")
+    print(f"  Total:   {len(discovered_symbols)}")
     print(f"{'='*60}")
 
 

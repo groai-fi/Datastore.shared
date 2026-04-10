@@ -1,49 +1,43 @@
 """
 Merge Binance parquet price files
 
-Usage:
-    python merge_parquet_prices.py --exchange Binance --symbol BTCUSDT --path appData/trainData_crypto/prices_v3.parquet --interval_base 1m
+Usage (installed CLI):
+    binance-merge-parquet --exchange Binance --symbol BTCUSDT --path /data/prices_v3.parquet --interval_base 1m
+
+Usage (direct):
+    python -m groai_fi_datastore_shared.Binance.cli.merge_parquet_prices --exchange Binance ...
 """
-import os
 import sys
 import argparse
 import datetime as dt
-from pathlib import Path
 
-# Add parent directory to path for imports
-SCRIPT_DIR = Path(__file__).resolve().parent
-BINANCE_DIR = SCRIPT_DIR.parent
-sys.path.insert(0, str(BINANCE_DIR.parent))
-
-# Import from Binance module
-from Binance import schema, helper
-from Binance.utils import setup_logger, readable_error, get_project_root
-from Binance.helper import load_base_price
-from shared import copy_dir
+# Import from installed package
+from groai_fi_datastore_shared.Binance import schema, helper
+from groai_fi_datastore_shared.Binance.utils import setup_logger, readable_error, get_project_root
+from groai_fi_datastore_shared.Binance.helper import load_base_price
+from groai_fi_datastore_shared.Binance.cli.shared import copy_dir
 
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description='Merge Binance parquet price files')
 
     parser.add_argument('--exchange', type=str, required=True,
-                        help='exchange')
+                        help='exchange (e.g. Binance)')
 
     parser.add_argument('--symbol', type=str, required=True,
-                        help='symbol')
+                        help='symbol (e.g. BTCUSDT)')
 
     parser.add_argument('--path', type=str, required=True,
-                        help='price_data_path')
+                        help='absolute path to price data root directory')
 
     parser.add_argument('--interval_base', type=str, required=True,
-                        help='interval_base')
+                        help='base interval (e.g. 1m)')
 
-    cmd_args = parser.parse_args()
-
-    return cmd_args
+    return parser.parse_args()
 
 
 def run():
-    """Main entry point"""
+    """Main entry point (registered as `binance-merge-parquet` CLI)"""
     cmd_args = vars(parse_arguments())
     # cmd_args = {
     #     "exchange": "Binance",
@@ -55,18 +49,18 @@ def run():
 
     now_str = dt.datetime.now().strftime('%Y%m%dT%H%M%S')
 
-    price_dir = f"{get_project_root()}/{cmd_args['path']}"
+    price_dir = cmd_args['path']
     hive_dir = f"/exchange={cmd_args['exchange']}/symbol={cmd_args['symbol']}"
     price_dir_full = f"{price_dir}{hive_dir}"
     backup_dir = f"{price_dir_full}_{now_str}"
 
-    # load prices - read all columns without forcing index
+    # Load prices — read all columns without forcing index
     price_pd = load_base_price(
         cmd_args['exchange'],
         cmd_args['symbol'],
         price_dir,
         cmd_args['interval_base'],
-        cols=None,  # Read all columns
+        cols=None,   # Read all columns
         index=False  # Don't force index, read as-is
     )
 
@@ -84,39 +78,38 @@ def run():
         sys.exit(1)
 
     try:
-        logger.info(f'Computing Dask DataFrame to pandas...')
-        # Convert Dask DataFrame to pandas for proper handling
+        logger.info('Computing Dask DataFrame to pandas...')
         price_pd_computed = price_pd.compute()
-        
+
         logger.info(f'Loaded {len(price_pd_computed)} rows')
         logger.info(f'Index: {price_pd_computed.index.name}')
         logger.info(f'Columns: {list(price_pd_computed.columns)}')
-        
+
         # Reset index if it's not named or is __null_dask_index__
         if price_pd_computed.index.name in [None, '__null_dask_index__']:
             logger.info('Resetting unnamed/null index')
             price_pd_computed = price_pd_computed.reset_index(drop=True)
-        
+
         # Ensure required columns exist
         if 'exchange' not in price_pd_computed.columns:
             price_pd_computed['exchange'] = cmd_args['exchange']
         if 'symbol' not in price_pd_computed.columns:
             price_pd_computed['symbol'] = cmd_args['symbol']
-        
+
         # Ensure date column exists or is the index
         if price_pd_computed.index.name != 'date' and 'date' not in price_pd_computed.columns:
             logger.error("No 'date' column or index found in data")
             logger.error(f"Available columns: {list(price_pd_computed.columns)}")
             logger.error(f"Index name: {price_pd_computed.index.name}")
             sys.exit(1)
-        
+
         # If date is a column, set it as index
         if 'date' in price_pd_computed.columns and price_pd_computed.index.name != 'date':
             logger.info('Setting date column as index')
             price_pd_computed.set_index('date', inplace=True)
-        
+
         logger.info(f'Final DataFrame: index={price_pd_computed.index.name}, columns={list(price_pd_computed.columns)}')
-        
+
         # Save merged data
         helper.save_price_parquet(
             price_pd_computed,

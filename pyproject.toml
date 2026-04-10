@@ -1,17 +1,59 @@
 [project]
 name = "groai-fi-datastore-shared"
 version = "0.1.0"
-description = "Add your description here"
+description = "Shared datastore utilities for GroAI.fi — Binance market data downloading, parquet storage, and trading infrastructure"
 readme = "README.md"
+license = { file = "LICENSE" }
 authors = [
     { name = "Hamilton", email = "hamilton@aiart.io" }
 ]
-requires-python = ">=3.8"
-dependencies = []
+requires-python = ">=3.9"
+keywords = ["binance", "crypto", "market-data", "parquet", "trading", "datastore"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Financial and Insurance Industry",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business :: Financial :: Investment",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "python-binance>=1.0.34",
+    "pandas>=1.5.0",
+    "numpy>=1.23.0",
+    "dask[dataframe]>=2023.1.0",
+    "pyarrow>=10.0.0",
+    "pytz>=2022.1",
+    "python-dateutil>=2.8.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+]
 
 [project.scripts]
-groai-fi-datastore-shared = "groai_fi_datastore_shared:main"
+binance-download-price = "groai_fi_datastore_shared.Binance.cli.download_price_binance:run"
+binance-merge-parquet   = "groai_fi_datastore_shared.Binance.cli.merge_parquet_prices:run"
+binance-auto-update     = "groai_fi_datastore_shared.Binance.cli.auto_update_prices:main"
+
+[project.urls]
+Homepage   = "https://github.com/groai-fi/datastore.shared"
+Repository = "https://github.com/groai-fi/datastore.shared"
+Issues     = "https://github.com/groai-fi/datastore.shared/issues"
 
 [build-system]
-requires = ["uv_build>=0.11.6,<0.12.0"]
+requires      = ["uv_build>=0.11.6,<0.12.0"]
 build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+]

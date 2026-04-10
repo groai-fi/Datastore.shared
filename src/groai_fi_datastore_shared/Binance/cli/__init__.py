@@ -1,14 +1,18 @@
 """
-Binance Entry Scripts
+Binance CLI Entry Scripts
 
-This folder contains standalone entry scripts for the Binance module.
-All scripts are self-contained and can be called directly.
+This package contains installed entry-point scripts for the Binance module.
+All scripts are self-contained and use absolute package imports.
+
+Entry points (registered in pyproject.toml):
+    binance-download-price   → download_price_binance:run
+    binance-merge-parquet    → merge_parquet_prices:run
+    binance-auto-update      → auto_update_prices:main
 """
 
 __all__ = [
     'download_price_binance',
     'merge_parquet_prices',
     'auto_update_prices',
-    'test_download_price_binance',
     'shared',
 ]

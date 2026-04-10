@@ -1,23 +1,19 @@
 """
 Download Binance price data
 
-Usage:
-    python download_price_binance.py --exchange Binance --symbol BTCUSDT --tframe 1m --path appData/trainData_crypto/prices_v3.parquet --start_date 2024/01/01
+Usage (installed CLI):
+    binance-download-price --symbol BTCUSDT --tframe 1m --path /data/prices_v3.parquet --start_date 2024/01/01
+
+Usage (direct):
+    python -m groai_fi_datastore_shared.Binance.cli.download_price_binance --symbol BTCUSDT ...
 """
-import os
 import sys
 import argparse
 from datetime import datetime as dt
-from pathlib import Path
 
-# Add parent directory to path for imports
-SCRIPT_DIR = Path(__file__).resolve().parent
-BINANCE_DIR = SCRIPT_DIR.parent
-sys.path.insert(0, str(BINANCE_DIR.parent))
-
-# Import from Binance module
-from Binance import BinanceMarketDataDownloader
-from Binance.utils import setup_logger, readable_error
+# Import from installed package
+from groai_fi_datastore_shared.Binance import BinanceMarketDataDownloader
+from groai_fi_datastore_shared.Binance.utils import setup_logger, readable_error
 
 
 def parse_arguments():
@@ -27,13 +23,13 @@ def parse_arguments():
                         default='Binance', help='exchange (default: Binance)')
 
     parser.add_argument('--symbol', type=str, required=True,
-                        help='symbol')
+                        help='symbol (e.g. BTCUSDT)')
 
     parser.add_argument('--tframe', type=str, required=False,
                         default='1m', help='kline_tframe (default: 1m)')
 
     parser.add_argument('--path', type=str, required=True,
-                        help='price_data_path')
+                        help='absolute path to price data root directory')
 
     parser.add_argument('--start_date', type=str, required=True,
                         help='start date in format YYYY/MM/DD')
@@ -41,9 +37,7 @@ def parse_arguments():
     parser.add_argument('--remove_old', action='store_true',
                         help='remove old data (flag)')
 
-    cmd_args = parser.parse_args()
-
-    return cmd_args
+    return parser.parse_args()
 
 
 def run_binance(cmd_args: dict, logger):
@@ -60,7 +54,7 @@ def run_binance(cmd_args: dict, logger):
 
 
 def run():
-    """Main entry point"""
+    """Main entry point (registered as `binance-download-price` CLI)"""
     cmd_args = vars(parse_arguments())
     # easy read
     # cmd_args = {
@@ -72,7 +66,7 @@ def run():
     # }
     if cmd_args['symbol'] in ["BTCUSDT", "ETHUSDT", "LTCUSDT"]:
         cmd_args['start_date'] = "2018/03/01"
-    
+
     logger = setup_logger('script_download_price_binance.log', cmd_args['symbol'])
 
     try:
