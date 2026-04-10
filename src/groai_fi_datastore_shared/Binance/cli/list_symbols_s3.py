@@ -27,8 +27,6 @@ import os
 import sys
 import argparse
 
-import duckdb
-
 from groai_fi_datastore_shared.Binance.utils import readable_error
 from groai_fi_datastore_shared.Binance.cli.s3_utils import (
     configure_duckdb_s3,
@@ -59,6 +57,7 @@ def parse_arguments():
 
 def run():
     """Main entry point (registered as `binance-list-symbols-s3` CLI)."""
+    import duckdb  # lazy import — only needed at runtime, not during module load
     args = parse_arguments()
 
     if not args.bucket:

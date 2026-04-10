@@ -1,6 +1,6 @@
 [project]
 name = "groai-fi-datastore-shared"
-version = "0.1.0"
+version = "0.2.1"
 description = "Shared datastore utilities for GroAI.fi — Binance market data downloading, parquet storage, and trading infrastructure"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -38,6 +38,7 @@ dependencies = [
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
+    "python-dotenv>=1.0.0",
 ]
 
 [project.scripts]
@@ -65,13 +66,14 @@ build-backend = "uv_build"
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
+    "python-dotenv>=1.0.0",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts   = "-v"
 markers   = [
-    "integration: tests requiring a live, unrestricted Binance API connection (skipped in CI)",
+    "integration: tests requiring a live, unrestricted Binance API connection or S3 credentials (skipped in CI)",
 ]
 filterwarnings = [
     "ignore::DeprecationWarning",

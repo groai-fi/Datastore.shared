@@ -9,18 +9,17 @@ All functions read credentials from environment variables:
 """
 import os
 from datetime import datetime, timezone
-from typing import Optional
-
-import duckdb
+from typing import Any, Optional
 
 
 # ── DuckDB configuration ─────────────────────────────────────────────────────
 
-def configure_duckdb_s3(con: duckdb.DuckDBPyConnection) -> duckdb.DuckDBPyConnection:
+def configure_duckdb_s3(con: Any) -> Any:
     """
     Load the httpfs extension and configure S3-compatible credentials.
     Reads endpoint / key / secret from environment variables.
     """
+    import duckdb  # lazy import — only required when S3 operations are performed
     endpoint_raw = os.environ["S3_ENDPOINT_URL"]
     # Strip scheme so DuckDB receives only the host (e.g. t3.storageapi.dev)
     endpoint = endpoint_raw.replace("https://", "").replace("http://", "").rstrip("/")
@@ -72,7 +71,7 @@ def list_s3_symbols(bucket: str, price_root: str, exchange: str) -> list:
 
 # ── Date and count queries ───────────────────────────────────────────────────
 
-def get_max_date_s3(con: duckdb.DuckDBPyConnection, s3_glob: str) -> Optional[datetime]:
+def get_max_date_s3(con: Any, s3_glob: str) -> Optional[datetime]:
     """
     Return the maximum date found across all parquet files matching s3_glob.
     Returns None if no files exist or all files are empty.
@@ -92,7 +91,7 @@ def get_max_date_s3(con: duckdb.DuckDBPyConnection, s3_glob: str) -> Optional[da
         return None
 
 
-def count_rows_s3(con: duckdb.DuckDBPyConnection, s3_glob: str) -> int:
+def count_rows_s3(con: Any, s3_glob: str) -> int:
     """
     Return the total row count across all parquet files matching s3_glob.
     Used for merge validation.

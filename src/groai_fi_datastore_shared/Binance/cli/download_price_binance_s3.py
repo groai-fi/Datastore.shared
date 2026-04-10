@@ -78,8 +78,16 @@ def _shape_df(df: pd.DataFrame, symbol: str, exchange: str) -> pd.DataFrame:
     df = df.iloc[:, :6].copy()
     df.columns = schema.price_columns      # date, open, high, low, close, volume
 
+    # The Binance API may return dates as integer ms timestamps or already-formatted
+    # strings. Handle both cases gracefully.
     if not pd.api.types.is_datetime64_any_dtype(df["date"]):
-        df["date"] = pd.to_datetime(df["date"], unit="ms", utc=True)
+        first_val = df["date"].iloc[0] if len(df) > 0 else None
+        try:
+            first_val_numeric = float(first_val)  # will succeed for int/float ms values
+            df["date"] = pd.to_datetime(df["date"].astype(float), unit="ms", utc=True)
+        except (TypeError, ValueError):
+            # Already a string datetime — parse directly
+            df["date"] = pd.to_datetime(df["date"], utc=True)
 
     df["symbol"] = symbol
     df["exchange"] = exchange
