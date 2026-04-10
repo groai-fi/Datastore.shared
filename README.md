@@ -74,8 +74,8 @@ binance-merge-parquet \
 
 ```bash
 binance-auto-update \
-  --exchange-dir /absolute/path/to/prices_v3.parquet/exchange=Binance \
-  --price-root /absolute/path/to/prices_v3.parquet \
+  --exchange Binance \
+  --path /absolute/path/to/prices_v3.parquet \
   --tframe 1m
 ```
 
