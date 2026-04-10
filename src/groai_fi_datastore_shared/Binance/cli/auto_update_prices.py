@@ -17,7 +17,7 @@ from datetime import datetime, timedelta
 
 # Import from installed package
 from groai_fi_datastore_shared.Binance import BinanceMarketDataDownloader, helper
-from groai_fi_datastore_shared.Binance.utils import setup_logger, readable_error
+from groai_fi_datastore_shared.Binance.utils import readable_error
 from groai_fi_datastore_shared.Binance.cli.shared import copy_dir
 
 
@@ -79,34 +79,36 @@ def get_last_date(symbol_path):
         return None
 
 
-def download_symbol(symbol, start_date, price_root, tframe, logger):
+def download_symbol(symbol, start_date, price_root, tframe):
     """Download price data for a symbol"""
+    import logging
+    _null_logger = logging.getLogger(f"binance.autoupdate.{symbol}")
+    _null_logger.addHandler(logging.NullHandler())
     try:
         print(f"  Downloading from {start_date.strftime('%Y/%m/%d')}...")
-
         result = BinanceMarketDataDownloader.catchup_price_binance(
             symbol=symbol,
             kline_tframe=tframe,
             default_download_start_date=start_date,
             price_root_dir=price_root,
-            logger=logger
+            logger=_null_logger
         )
-
         return result is not None
     except Exception as e:
         err = readable_error(e, __file__)
-        logger.error(f"Download failed for {symbol}: {err}")
         print(f"  Error: {err}")
         return False
 
 
-def merge_symbol(symbol, exchange, price_root, logger):
+def merge_symbol(symbol, exchange, price_root):
     """Merge and compact price data for a symbol"""
+    import logging
+    _null_logger = logging.getLogger(f"binance.merge.{symbol}")
+    _null_logger.addHandler(logging.NullHandler())
     try:
         print("  Merging and compacting...")
-
         price_dir_full = f"{price_root}/exchange={exchange}/symbol={symbol}"
-
+        
         # Backup
         now_str = dt.datetime.now().strftime('%Y%m%dT%H%M%S')
         backup_dir = f"{price_dir_full}_{now_str}"
@@ -120,22 +122,17 @@ def merge_symbol(symbol, exchange, price_root, logger):
             cols=None,
             index=False
         )
-
         if price_dd is None:
-            logger.error(f"Failed to load price data for {symbol}")
+            print(f"  Error: Failed to load price data for {symbol}")
             return False
-
-        # Backup
         try:
-            copy_dir(price_dir_full, backup_dir, logger)
-            logger.info(f'Backup to {backup_dir}')
+            copy_dir(price_dir_full, backup_dir, _null_logger)
+            print(f'  Backup → {backup_dir}')
         except Exception as e:
             err = readable_error(e, __file__)
-            logger.warning(f'Backup failed: {err}')
-
-        # Compute to pandas
+            print(f'  Warning: Backup failed: {err}')
         price_pd = price_dd.compute()
-
+        
         # Reset index if needed
         if price_pd.index.name in [None, '__null_dask_index__']:
             price_pd = price_pd.reset_index(drop=True)
@@ -145,7 +142,7 @@ def merge_symbol(symbol, exchange, price_root, logger):
             price_pd['exchange'] = exchange
         if 'symbol' not in price_pd.columns:
             price_pd['symbol'] = symbol
-
+        
         # Set date as index
         if 'date' in price_pd.columns and price_pd.index.name != 'date':
             price_pd.set_index('date', inplace=True)
@@ -158,18 +155,15 @@ def merge_symbol(symbol, exchange, price_root, logger):
             overwrite=True,
             n_partitions=10
         )
-
-        logger.info(f'Successfully saved merged data to {price_dir_full}')
+        print(f'  ✓ Saved merged data to {price_dir_full}')
         return True
-
     except Exception as e:
         err = readable_error(e, __file__)
-        logger.error(f"Merge failed for {symbol}: {err}")
         print(f"  Error: {err}")
         return False
 
 
-def get_earliest_date(symbol, tframe, logger):
+def get_earliest_date(symbol, tframe):
     """Get the earliest available date for a symbol from Binance API"""
     try:
         from binance.client import Client
@@ -181,14 +175,14 @@ def get_earliest_date(symbol, tframe, logger):
             # First element is open time in milliseconds
             first_timestamp_ms = first_candle[0][0]
             first_date = datetime.fromtimestamp(first_timestamp_ms / 1000)
-            logger.info(f"Earliest available date for {symbol}: {first_date}")
+            print(f"  Earliest available date for {symbol}: {first_date}")
             return first_date
         else:
-            logger.warning(f"No candles found for {symbol}, using default date")
+            print(f"  Warning: No candles found for {symbol}, using default date")
             return datetime(2013, 1, 1)
 
     except Exception as e:
-        logger.warning(f"Failed to fetch earliest timestamp for {symbol}: {e}. Using default date.")
+        print(f"  Warning: Failed to fetch earliest timestamp for {symbol}: {e}. Using default date.")
         return datetime(2013, 1, 1)
 
 
@@ -228,7 +222,6 @@ def main():
         print(f"Processing {symbol}")
         print(f"{'='*60}")
 
-        logger = setup_logger('auto_update_prices.log', symbol)
         symbol_path = exchange_dir / f"symbol={symbol}"
 
         # Get last date
@@ -236,7 +229,7 @@ def main():
 
         if last_date is None:
             print(f"Could not determine last date for {symbol}, fetching earliest from Binance API...")
-            start_date = get_earliest_date(symbol, tframe, logger)
+            start_date = get_earliest_date(symbol, tframe)
             print(f"Starting from earliest available: {start_date.strftime('%Y/%m/%d')}")
         else:
             # Add 1 day to last date
@@ -245,7 +238,7 @@ def main():
             print(f"Last date: {last_date}, starting from: {start_date.strftime('%Y/%m/%d')}")
 
         # 3. Download
-        if not download_symbol(symbol, start_date, price_root, tframe, logger):
+        if not download_symbol(symbol, start_date, price_root, tframe):
             print(f"✗ Download failed for {symbol}, skipping merge")
             fail_count += 1
             continue
@@ -253,7 +246,7 @@ def main():
         # 4. Merge if too many parquet files
         num_parquets = len(list(symbol_path.glob("part.*.parquet")))
         if num_parquets > 50:
-            if not merge_symbol(symbol, exchange, price_root, logger):
+            if not merge_symbol(symbol, exchange, price_root):
                 print(f"✗ Merge failed for {symbol}")
                 fail_count += 1
                 continue

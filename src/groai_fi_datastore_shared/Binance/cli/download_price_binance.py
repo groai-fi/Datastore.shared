@@ -13,7 +13,7 @@ from datetime import datetime as dt
 
 # Import from installed package
 from groai_fi_datastore_shared.Binance import BinanceMarketDataDownloader
-from groai_fi_datastore_shared.Binance.utils import setup_logger, readable_error
+from groai_fi_datastore_shared.Binance.utils import readable_error
 
 
 def parse_arguments():
@@ -40,16 +40,19 @@ def parse_arguments():
     return parser.parse_args()
 
 
-def run_binance(cmd_args: dict, logger):
+def run_binance(cmd_args: dict):
     """Run Binance price download"""
-    start_date = dt.strptime(cmd_args['start_date'], '%Y/%m/%d')
+    import logging
+    _null_logger = logging.getLogger(f"binance.dl.{cmd_args['symbol']}")
+    _null_logger.addHandler(logging.NullHandler())
 
+    start_date = dt.strptime(cmd_args['start_date'], '%Y/%m/%d')
     BinanceMarketDataDownloader.catchup_price_binance(
         cmd_args['symbol'],
         cmd_args['tframe'],
         start_date,
         cmd_args['path'],
-        logger
+        _null_logger
     )
 
 
@@ -67,17 +70,15 @@ def run():
     if cmd_args['symbol'] in ["BTCUSDT", "ETHUSDT", "LTCUSDT"]:
         cmd_args['start_date'] = "2018/03/01"
 
-    logger = setup_logger('script_download_price_binance.log', cmd_args['symbol'])
-
     try:
         if cmd_args['exchange'] == "Binance":
-            run_binance(cmd_args, logger)
+            run_binance(cmd_args)
         else:
             raise Exception(f"unknown exchange {cmd_args['exchange']}")
 
     except Exception as e:
         err = readable_error(e, __file__)
-        logger.error(err)
+        print(f"Error: {err}")
         sys.exit(1)
 
 

@@ -30,6 +30,8 @@ dependencies = [
     "pyarrow>=10.0.0",
     "pytz>=2022.1",
     "python-dateutil>=2.8.2",
+    "duckdb>=0.10.0",
+    "boto3>=1.26.0",
 ]
 
 [project.optional-dependencies]
@@ -39,9 +41,16 @@ dev = [
 ]
 
 [project.scripts]
-binance-download-price = "groai_fi_datastore_shared.Binance.cli.download_price_binance:run"
-binance-merge-parquet   = "groai_fi_datastore_shared.Binance.cli.merge_parquet_prices:run"
-binance-auto-update     = "groai_fi_datastore_shared.Binance.cli.auto_update_prices:main"
+binance-download-price    = "groai_fi_datastore_shared.Binance.cli.download_price_binance:run"
+binance-merge-parquet     = "groai_fi_datastore_shared.Binance.cli.merge_parquet_prices:run"
+binance-auto-update       = "groai_fi_datastore_shared.Binance.cli.auto_update_prices:main"
+binance-list-symbols      = "groai_fi_datastore_shared.Binance.cli.list_symbols:run"
+binance-remove-symbol     = "groai_fi_datastore_shared.Binance.cli.remove_symbol:run"
+binance-download-price-s3 = "groai_fi_datastore_shared.Binance.cli.download_price_binance_s3:run"
+binance-merge-parquet-s3  = "groai_fi_datastore_shared.Binance.cli.merge_parquet_prices_s3:run"
+binance-auto-update-s3    = "groai_fi_datastore_shared.Binance.cli.auto_update_prices_s3:main"
+binance-list-symbols-s3   = "groai_fi_datastore_shared.Binance.cli.list_symbols_s3:run"
+binance-remove-symbol-s3  = "groai_fi_datastore_shared.Binance.cli.remove_symbol_s3:run"
 
 [project.urls]
 Homepage   = "https://github.com/groai-fi/datastore.shared"
