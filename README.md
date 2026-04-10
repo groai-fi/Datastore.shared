@@ -12,11 +12,11 @@ Shared datastore utilities for **GroAI.fi** — Binance market data downloading,
 ## Features
 
 - **Market Data Downloading** — Incremental Binance OHLCV download with automatic catch-up from where you left off
-- **Parquet Storage** — Hive-partitioned Parquet files (`exchange=X/symbol=Y/part.N.parquet`) powered by Dask
-- **File Locking** — Safe concurrent writes via `.write.lock` file with stale-lock detection
+- **Parquet Storage** — Hive-partitioned Parquet files (`exchange=X/symbol=Y/part.N.parquet`) powered by Dask (local) and DuckDB (S3)
+- **File Locking** — Safe concurrent writes via `.write.lock` file with stale-lock detection (Local filesystem only)
 - **Order Execution** — `BinanceOrder`, `BinanceClient` with spot and margin support
 - **Backtesting** — `BacktestOrder`, `BacktestOrderData` for strategy simulation
-- **CLI Tools** — Three ready-to-use command-line scripts for data management
+- **CLI Suite** — 10 distinct CLI commands enabling both isolated local-filesystem and cloud-native S3 workflows
 
 ---
 
@@ -40,6 +40,10 @@ The following environment variables are used across modules:
 |---|---|---|
 | `BINANCE_API_KEY` | Yes (trading/download) | Your Binance API key |
 | `BINANCE_API_SECRET` | Yes (trading/download) | Your Binance API secret |
+| `S3_ENDPOINT_URL` | Yes (if S3) | Your object storage endpoint (e.g. `https://t3.storageapi.dev`) |
+| `S3_BUCKET_NAME` | Yes (if S3) | The target bucket name |
+| `S3_ACCESS_KEY_ID` | Yes (if S3) | S3 access key ID |
+| `S3_SECRET_ACCESS_KEY` | Yes (if S3) | S3 standard secret access key |
 | `BINANCE_API_KEY_TEST` | No | Testnet API key |
 | `BINANCE_API_SECRET_TEST` | No | Testnet API secret |
 | `SEND_MAIL_RECEIVER` | No | Email address for trade alerts |
@@ -50,33 +54,36 @@ Create a `.env` file in your project root and load it with `python-dotenv` or ex
 
 ## CLI Usage
 
-### Download price data
+The package exposes identical pipelines for **Local Filesystems** and **S3 Storage**.
 
+### Local Storage Commands
+Run data engineering workflows directly onto a mounted drive via Dask and PyArrow files:
 ```bash
-binance-download-price \
-  --symbol BTCUSDT \
-  --tframe 1m \
-  --path /absolute/path/to/prices_v3.parquet \
-  --start_date 2024/01/01
+# 1. Download
+binance-download-price --symbol BTCUSDT --tframe 1m --path /path/to/prices_v3.parquet
+# 2. Merge shards
+binance-merge-parquet --exchange Binance --symbol BTCUSDT --path /path/to/prices_v3.parquet --interval_base 1m
+# 3. Auto-catchup all tracked symbols
+binance-auto-update --exchange Binance --path /path/to/prices_v3.parquet --tframe 1m
+# 4. View tracked symbols
+binance-list-symbols --path /path/to/prices_v3.parquet
+# 5. Clean / remove
+binance-remove-symbol --symbol BTCUSDT --path /path/to/prices_v3.parquet --yes
 ```
 
-### Merge / compact parquet files
-
+### S3 Storage Commands (Native)
+Run structurally identical commands operating directly on object storage leveraging DuckDB HTTPFS. Local storage volumes are not required.
 ```bash
-binance-merge-parquet \
-  --exchange Binance \
-  --symbol BTCUSDT \
-  --path /absolute/path/to/prices_v3.parquet \
-  --interval_base 1m
-```
-
-### Auto-update all symbols
-
-```bash
-binance-auto-update \
-  --exchange Binance \
-  --path /absolute/path/to/prices_v3.parquet \
-  --tframe 1m
+# S3 1. Download
+binance-download-price-s3 --symbol BTCUSDT --tframe 1m --bucket my-bucket
+# S3 2. Merge shards (Memory optimized via DuckDB)
+binance-merge-parquet-s3 --exchange Binance --symbol BTCUSDT --bucket my-bucket
+# S3 3. Auto-catchup all tracking
+binance-auto-update-s3 --exchange Binance --bucket my-bucket --tframe 1m
+# S3 4. View S3 inventory
+binance-list-symbols-s3 --bucket my-bucket
+# S3 5. Clean / remove
+binance-remove-symbol-s3 --symbol BTCUSDT --bucket my-bucket --yes
 ```
 
 ---
