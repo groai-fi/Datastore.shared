@@ -52,7 +52,21 @@ def readable_error(e, file):
 
 
 def get_project_root():
-    """Get project root directory"""
+    """Get project root directory.
+
+    .. deprecated::
+        This function resolves to the package's ``src/`` directory when the
+        package is installed via pip, which is rarely what callers want.
+        Pass absolute paths explicitly instead. This function will be removed
+        in a future release.
+    """
+    import warnings
+    warnings.warn(
+        "get_project_root() is deprecated and will be removed in a future release. "
+        "Pass absolute paths explicitly or set the GROAI_DATA_DIR environment variable.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     return Path(__file__).parent.parent.parent
 
 
@@ -122,46 +136,56 @@ import logging
 import os
 
 
-def setup_logger(file_name, symbol, log_level=logging.INFO):
-    """Setup logger for scripts"""
-    project_root = get_project_root()
-    
+def setup_logger(file_name, symbol, log_level=logging.INFO, log_dir: Optional[str] = None):
+    """Setup logger for scripts.
+
+    :param file_name: Log filename (e.g. 'download.log').
+    :param symbol:    Logger name / trading symbol label.
+    :param log_level: Logging level (default: INFO).
+    :param log_dir:   Absolute path to the log directory.  Resolution order:
+                      1. ``log_dir`` argument (if provided)
+                      2. ``GROAI_LOG_DIR`` environment variable
+                      3. ``<cwd>/logs/``
+    """
+    # Resolve log directory
+    if log_dir is None:
+        log_dir = os.getenv("GROAI_LOG_DIR") or str(Path.cwd() / "logs")
+
+    resolved_log_dir = Path(log_dir)
+    resolved_log_dir.mkdir(parents=True, exist_ok=True)
+
+    log_file = str(resolved_log_dir / file_name)
+
     logger = logging.getLogger(symbol)
-    
+
     # Clear any existing handlers
     if logger.handlers:
         logger.handlers.clear()
-    
-    log_file = f"{project_root}/logs/{file_name}"
-    log_dir = os.path.dirname(os.path.abspath(log_file))
-    if not os.path.exists(log_dir):
-        os.makedirs(log_dir, exist_ok=True)
-        print(f"| folder {log_dir} is created", flush=True)
-    
+
     # file handler to save all levels
     file_handler = logging.FileHandler(log_file)
     file_handler.setLevel(log_level)
-    
+
     # stream handler (console) to show only INFO level and above
     stream_handler = logging.StreamHandler()
     stream_handler.setLevel(log_level)
-    
+
     # create formatter
     formatter = logging.Formatter(
         "%(asctime)s|%(levelname)s|%(name)s|%(filename)s:%(lineno)d|[tid:%(thread)d]|%(message)s",
         datefmt="%Y-%m-%d %H:%M:%S")
-    
+
     # add formatter to handlers
     stream_handler.setFormatter(formatter)
     file_handler.setFormatter(formatter)
-    
+
     # Add handlers to logger
     logger.addHandler(stream_handler)
     logger.addHandler(file_handler)
-    
+
     logger.setLevel(log_level)
     logger.handlers[0].flush()
-    
+
     return logger
 
 

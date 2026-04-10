@@ -20,17 +20,35 @@ from typing import Final, Optional
 from binance.client import Client as BinanceAPI
 
 asset_columns = ['Symbol', 'base_asset', 'quote_asset', 'precision', 'permission', 'order_type']
-# This API is for downloading data or price, so USE IS_LIVE and no need to add logic
-client = BinanceAPI(os.getenv("BINANCE_API_KEY"), os.getenv("BINANCE_API_SECRET"), testnet=False)
+
+# ── Lazy client singleton ────────────────────────────────────────────────────
+# Avoid module-level instantiation so the package can be imported in offline /
+# test contexts without hitting the Binance API or requiring credentials.
+_client: Optional[BinanceAPI] = None
 
 
-def get_asset() -> list:
+def _get_client() -> BinanceAPI:
+    """Return the shared BinanceAPI client, initialising it on first call."""
+    global _client
+    if _client is None:
+        _client = BinanceAPI(
+            os.getenv("BINANCE_API_KEY"),
+            os.getenv("BINANCE_API_SECRET"),
+            testnet=False,
+        )
+    return _client
+
+
+def get_asset(output_path: Optional[str] = None) -> list:
     """
-    Get all product from Binance
-    :return:
+    Fetch all tradeable products from Binance.
+
+    :param output_path: Optional absolute path to write the asset CSV.
+                        If None, the CSV is not written.
+    :return: List of trading pair symbols.
     """
     try:
-        rows = client.get_exchange_info()['symbols']
+        rows = _get_client().get_exchange_info()['symbols']
         assets = []  # only asset symbol
         products = []  # all data
         for row in rows:
@@ -49,7 +67,8 @@ def get_asset() -> list:
 
     products_pd = pd.DataFrame(products, columns=asset_columns)
     products_pd.updated = False
-    products_pd.to_csv('model_data/binance_asset.csv', index=False)
+    if output_path:
+        products_pd.to_csv(output_path, index=False)
 
     return assets
 
@@ -90,7 +109,7 @@ def download_data_from_binance(symbol, kline_tframe, from_date, to_date, step=1,
 
         # download data
 
-        klines = client.get_klines(symbol, kline_tframe, from_millis_str, step_millis_str)
+        klines = _get_client().get_klines(symbol, kline_tframe, from_millis_str, step_millis_str)
         klines_len = len(klines)
         if klines_len == 0:
             sys.stdout.write('\r   Failed to download from %s to %s. '
@@ -182,10 +201,10 @@ def download_data_from_binance_1minute(symbol, kline_tframe, from_date, to_date,
         step_millis_str = str(step_millis)
 
         # download data
-        klines = client.get_klines(symbol=symbol,
-                                   interval=kline_tframe,
-                                   startTime=from_millis,
-                                   endTime=step_millis)
+        klines = _get_client().get_klines(symbol=symbol,
+                                          interval=kline_tframe,
+                                          startTime=from_millis,
+                                          endTime=step_millis)
         if type(klines) is not list:
             if klines['code'] is not None and klines['msg'] is not None:
                 msg = 'error downloading Binance price:{0}, {1}, ' \
@@ -251,16 +270,13 @@ def download_data_from_binance_1minute(symbol, kline_tframe, from_date, to_date,
 
 
 def is_price_table_exist(exchange, asset, price_root_dir) -> bool:
-    # price_file = helper.get_parquet_filename(
-    #    '{0}/exchange={1}/symbol={2}/part.*.parquet'.format(dir, exchange, asset))
-    # is_existed = glob.glob(price_file)
-    # return len(is_existed) > 0
-    if price_root_dir[:2] == "./" or price_root_dir[:8] == "appData/":
-        price_root_dir = f"{utils.get_project_root()}/{price_root_dir}"
+    """
+    Check whether parquet files exist for the given exchange/symbol under price_root_dir.
 
+    :param price_root_dir: Must be an absolute path. Relative paths are no longer supported.
+    """
     root_dir_exist = utils.is_dir_exist(price_root_dir)
     if root_dir_exist:
-        # slash is to navigate Reference: https://docs.python.org/3/library/pathlib.html
         sibling = 'exchange={0}/symbol={1}/'.format(exchange, asset)
         month_folder = Path(price_root_dir).expanduser() / sibling
         list_of_month_folder = list(month_folder.glob('part.*.parquet'))
@@ -304,7 +320,7 @@ def catchup_price_binance(symbol, kline_tframe, default_download_start_date, pri
         # sys.exit()
 
     # folder location
-    dest_dir = f'{utils.get_project_root()}/{price_root_dir}/exchange={exchange}/symbol={symbol}'
+    dest_dir = f'{price_root_dir}/exchange={exchange}/symbol={symbol}'
     parquet_folder = Path(dest_dir).expanduser()
 
     # Create destination directory if it doesn't exist
@@ -374,7 +390,7 @@ def catchup_price_binance(symbol, kline_tframe, default_download_start_date, pri
                 # Use get_klines with startTime=0 to find the first available candle
                 # This works across different library versions compared to get_earliest_valid_timestamp
                 # startTime=0 (1970) will return the first candle for the symbol
-                first_candle = client.get_klines(symbol=symbol, interval=kline_tframe, startTime=0, limit=1)
+                first_candle = _get_client().get_klines(symbol=symbol, interval=kline_tframe, startTime=0, limit=1)
 
                 if first_candle and len(first_candle) > 0:
                     earliest_ts = int(first_candle[0][0])  # Open time
@@ -437,7 +453,7 @@ def catchup_price_binance(symbol, kline_tframe, default_download_start_date, pri
                 # sequence is important
                 stock_df = stock_df[schema.price_header_parquet]
                 # folder location
-                dest_dir = f'{utils.get_project_root()}/{price_root_dir}/exchange={exchange}/symbol={symbol}'
+                dest_dir = f'{price_root_dir}/exchange={exchange}/symbol={symbol}'
 
                 # append only when there is original data exists
                 is_append = len(parquets_ary) > 0 if last_datetime_utc is not None else False
@@ -523,7 +539,7 @@ def download_crypto_data(symbol, kline_tframe, start_date, price_root_dir, logge
         data = data[schema.price_header_parquet]
 
         # folder location
-        dest_dir = f'{utils.get_project_root()}/{price_root_dir}/exchange={exchange}/symbol={symbol}'
+        dest_dir = f'{price_root_dir}/exchange={exchange}/symbol={symbol}'
 
         helper.save_price_parquet(data, dest_dir,
                                   append=False,

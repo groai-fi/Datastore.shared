@@ -1,6 +1,7 @@
-# TODO: Path Resolution Refactoring
+> [!NOTE]
+> **Status as of 2026-04-10**: Issues 2, 3, 4, 5, 6, 7 are **resolved**.
+> Issue 1 is intentionally kept open (Option C — deprecation warning added).
 
-## Context
 
 The `get_project_root()` function in `utils.py` currently resolves paths using
 `Path(__file__).parent.parent.parent`, which returns the `src/` directory when
