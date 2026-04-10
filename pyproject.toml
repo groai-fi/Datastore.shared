@@ -1,6 +1,6 @@
 [project]
 name = "groai-fi-datastore-shared"
-version = "0.2.1"
+version = "0.2.2"
 description = "Shared datastore utilities for GroAI.fi — Binance market data downloading, parquet storage, and trading infrastructure"
 readme = "README.md"
 license = { file = "LICENSE" }
