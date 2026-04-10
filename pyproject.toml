@@ -57,3 +57,14 @@ dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts   = "-v"
+markers   = [
+    "integration: tests requiring a live, unrestricted Binance API connection (skipped in CI)",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::UserWarning",
+]

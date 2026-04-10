@@ -31,8 +31,8 @@ jobs:
       - name: Install package with dev extras
         run: uv sync --extra dev
 
-      - name: Run tests
-        run: uv run pytest tests/ -v --tb=short
+      - name: Run tests (unit only — integration tests require live Binance API)
+        run: uv run pytest tests/ -v --tb=short -m "not integration"
 
   # ─── Publish job: runs only when a vX.Y.Z tag is pushed ────────────────────
   publish:

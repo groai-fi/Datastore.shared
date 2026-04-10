@@ -1,16 +1,8 @@
-"""
-Unit test for Binance download and merge functionality
-
-Tests the complete flow:
-1. Fresh download
-2. Merge/compact
-3. Gap fill
-4. Multi-asset coexistence
-"""
 import unittest
 import os
 import shutil
 import tempfile
+import pytest
 from pathlib import Path
 from datetime import datetime, timedelta
 import pandas as pd
@@ -21,8 +13,14 @@ from groai_fi_datastore_shared.Binance import BinanceMarketDataDownloader, helpe
 from groai_fi_datastore_shared.Binance.utils import setup_logger
 
 
+@pytest.mark.integration
 class TestDownloadAndMerge(unittest.TestCase):
-    """Test complete download and merge workflow"""
+    """Test complete download and merge workflow.
+
+    Marked as ``integration`` — requires a live, unrestricted Binance API
+    connection.  These tests are skipped in CI automatically.
+    Run locally with: pytest -m integration
+    """
 
     @classmethod
     def setUpClass(cls):

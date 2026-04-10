@@ -1,24 +1,33 @@
 import unittest
+import pytest
 from datetime import datetime
 
 # Package imports (no sys.path hacks needed when installed via `uv sync`)
 from groai_fi_datastore_shared.Binance import BinanceMarketDataDownloader
 
 
+@pytest.mark.integration
 class TestBinanceKlines(unittest.TestCase):
+    """Tests that call the live Binance API.
+
+    Marked as ``integration`` — skipped in CI automatically.
+    Run locally with: pytest -m integration
+    """
     @classmethod
     def setUpClass(cls):
         try:
-            # _get_client() is the lazy singleton — calling it initialises the
-            # Binance API client on first access, without hitting it at import time.
             cls.client = BinanceMarketDataDownloader._get_client()
         except Exception as e:
-            print(f"Failed to initialise Binance client: {e}")
             cls.client = None
+            cls._init_error = str(e)
+
+    def _require_client(self):
+        """Skip the test if the Binance client could not be initialised."""
+        if not self.client:
+            self.skipTest(f"Binance client unavailable: {getattr(self, '_init_error', 'unknown error')}") 
 
     def test_get_klines_user_request(self):
-        if not self.client:
-            self.fail("Client could not be initialized")
+        self._require_client()
 
         symbol = "BCHUSDT"
         kline_tframe = '1m'
