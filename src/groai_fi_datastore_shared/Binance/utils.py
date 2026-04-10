@@ -134,6 +134,7 @@ def return_not_matches(a, b):
 
 import logging
 import os
+from typing import Optional
 
 
 def setup_logger(file_name, symbol, log_level=logging.INFO, log_dir: Optional[str] = None):

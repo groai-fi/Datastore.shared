@@ -1,25 +1,19 @@
 import unittest
-import os
-import sys
-import importlib
 from datetime import datetime
+
+# Package imports (no sys.path hacks needed when installed via `uv sync`)
+from groai_fi_datastore_shared.Binance import BinanceMarketDataDownloader
 
 
 class TestBinanceKlines(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        # Add project root to path to allow import of third_party
-        # File is in third_party/Binance/unit/test_get_klines.py
-        # root is ../../../
-        cls.project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..'))
-        if cls.project_root not in sys.path:
-            sys.path.append(cls.project_root)
-
         try:
-            cls.module = importlib.import_module("third_party.Binance.BinanceMarketDataDownloader")
-            cls.client = cls.module.client
+            # _get_client() is the lazy singleton — calling it initialises the
+            # Binance API client on first access, without hitting it at import time.
+            cls.client = BinanceMarketDataDownloader._get_client()
         except Exception as e:
-            print(f"Failed to import module: {e}")
+            print(f"Failed to initialise Binance client: {e}")
             cls.client = None
 
     def test_get_klines_user_request(self):
@@ -40,8 +34,6 @@ class TestBinanceKlines(unittest.TestCase):
         # 1. Test original code usage (Positional arguments)
         print("\n[Test 1] Positional Arguments (as in usage):")
         try:
-            # Assuming get_klines signature is (symbol, interval, ...)
-            # Warning: python-binance get_klines usually requires kwargs or specific order
             klines = self.client.get_klines(symbol, kline_tframe, from_millis_str, step_millis_str)
             print(f"SUCCESS. Returned {len(klines)} klines.")
         except Exception as e:
@@ -99,20 +91,20 @@ class TestBinanceKlines(unittest.TestCase):
         print("\n[Test 5] Recent Valid Data (24 hours ago):")
         try:
             now_ms = int(datetime.now().timestamp() * 1000)
-            start_ms = now_ms - (24 * 60 * 60 * 1000) # 24 hours ago
+            start_ms = now_ms - (24 * 60 * 60 * 1000)  # 24 hours ago
             end_ms = now_ms
-            
+
             klines = self.client.get_klines(
-                symbol=symbol, 
-                interval=kline_tframe, 
-                startTime=start_ms, 
+                symbol=symbol,
+                interval=kline_tframe,
+                startTime=start_ms,
                 endTime=end_ms
             )
             print(f"SUCCESS. Returned {len(klines)} klines using recent timestamp.")
             if len(klines) > 0:
-                 print(f"Sample data [0]: {klines[0]}")
+                print(f"Sample data [0]: {klines[0]}")
         except Exception as e:
-             print(f"FAILED: {type(e).__name__}: {e}")
+            print(f"FAILED: {type(e).__name__}: {e}")
 
         # Analysis of User's Timestamp
         print("\n=== Analysis ===")
@@ -124,8 +116,7 @@ class TestBinanceKlines(unittest.TestCase):
         if user_date > current_date:
             print("CONCLUSION: The user timestamp is in the FUTURE. That is why no data is returned.")
         else:
-             print("CONCLUSION: The user timestamp is in the past.")
-
+            print("CONCLUSION: The user timestamp is in the past.")
 
 
 if __name__ == '__main__':
