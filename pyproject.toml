@@ -1,6 +1,6 @@
 [project]
 name = "groai-fi-datastore-shared"
-version = "0.2.2"
+version = "0.2.3"
 description = "Shared datastore utilities for GroAI.fi — Binance market data downloading, parquet storage, and trading infrastructure"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -32,6 +32,7 @@ dependencies = [
     "python-dateutil>=2.8.2",
     "duckdb>=0.10.0",
     "boto3>=1.26.0",
+    "joblib>=1.2.0",
 ]
 
 [project.optional-dependencies]
