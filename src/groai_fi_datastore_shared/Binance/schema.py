@@ -15,6 +15,12 @@ price_parquet = {
 
 price_header_parquet = ['date', 'yymm', 'exchange', 'symbol', 'open', 'high', 'low', 'close', 'volume']
 
+# price_parquet_v3 split — see PRICE_PARQUET_V3_SPEC.md for the full contract
+# Columns written INSIDE the Parquet file (date is the index, not a column)
+price_parquet_file_columns = ['yymm', 'open', 'high', 'low', 'close', 'volume']
+# Columns encoded in the Hive S3 path only — MUST NOT appear in file data
+price_parquet_hive_columns = ['exchange', 'symbol']
+
 # Required for BinanceMarketDataDownloader.py line 426
 price_columns = ['date', 'open', 'high', 'low', 'close', 'volume']
 

@@ -43,6 +43,7 @@ import sys
 import argparse
 
 import duckdb
+import pandas as pd
 
 from groai_fi_datastore_shared.Binance.utils import readable_error
 from groai_fi_datastore_shared.Binance.cli.s3_utils import (
@@ -52,6 +53,7 @@ from groai_fi_datastore_shared.Binance.cli.s3_utils import (
     count_rows_s3,
     list_part_keys,
     delete_s3_keys,
+    write_parquet_to_s3,
 )
 
 
@@ -107,21 +109,27 @@ def run_for_symbol(
                                exclude="part.00000.parquet")
     print(f"  [{symbol}] Found {len(old_keys)} part files to consolidate")
 
-    # ── Step 2: Write merged file via DuckDB ─────────────────────────────────
+    # ── Step 2: Write merged file via PyArrow (price_parquet_v3 compliance) ────
     print(f"  [{symbol}] Writing merged file → {merged_path}")
-    con.execute(f"""
-        COPY (
-            SELECT *
-            FROM (
-                SELECT *, ROW_NUMBER() OVER (PARTITION BY date ORDER BY date) AS _rn
-                FROM read_parquet('{s3_glob}')
-            )
-            WHERE _rn = 1
-            ORDER BY date
+
+    # Read via DuckDB (fast parallel S3 reads, dedup logic).
+    # Explicitly select canonical columns so legacy files with exchange/symbol
+    # columns are handled gracefully — those Hive-partition columns are excluded.
+    merged_df = con.execute(f"""
+        SELECT date, yymm, open, high, low, close, volume
+        FROM (
+            SELECT *, ROW_NUMBER() OVER (PARTITION BY date ORDER BY date) AS _rn
+            FROM read_parquet('{s3_glob}')
         )
-        TO '{merged_path}'
-        (FORMAT PARQUET, COMPRESSION SNAPPY)
-    """)
+        WHERE _rn = 1
+        ORDER BY date
+    """).df()
+
+    merged_df["date"] = pd.to_datetime(merged_df["date"], utc=True)
+    merged_df = merged_df.set_index("date")
+
+    # Write via PyArrow — ensures date-as-index + yymm dict-encoded (spec compliance)
+    write_parquet_to_s3(merged_df, merged_path)
     print(f"  [{symbol}] Merged file written")
 
     # ── Step 3: Validate row count ────────────────────────────────────────────

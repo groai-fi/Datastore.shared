@@ -347,6 +347,146 @@ class TestListSymbolsS3Mocked(unittest.TestCase):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Schema contract unit tests — pure PyArrow, no S3 connection needed
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestSchemaContractUnit(unittest.TestCase):
+    """
+    Verify that _shape_df + the write_parquet_to_s3 PyArrow logic produce a
+    price_parquet_v3-compliant schema.
+
+    No S3 connection is required — writes are done to a local temp file.
+    """
+
+    def _make_raw_klines(self, n: int = 120) -> pd.DataFrame:
+        """Simulate raw klines as returned by download_data_from_binance_1minute."""
+        dates = pd.date_range("2024-01-01", periods=n, freq="1min", tz="UTC")
+        return pd.DataFrame({
+            "date":     (dates.astype("int64") // 10 ** 6).tolist(),  # ms integers
+            "open":     100.0, "high": 101.0, "low": 99.0,
+            "close":    100.5, "volume": 1000.0,
+            # Binance klines have 12 columns; _shape_df slices the first 6
+            "close_time": 0, "qav": 0.0, "num_trades": 0,
+            "tbb": 0.0, "tbq": 0.0, "ignore": 0.0,
+        })
+
+    # ------------------------------------------------------------------
+    # Rule 1 — date as index
+    # ------------------------------------------------------------------
+
+    def test_shape_df_date_is_index(self):
+        """_shape_df must return a DataFrame with 'date' as the named index."""
+        from groai_fi_datastore_shared.Binance.cli.download_price_binance_s3 import _shape_df
+
+        shaped = _shape_df(self._make_raw_klines(), symbol="BTCUSDT", exchange="Binance")
+
+        self.assertEqual(shaped.index.name, "date",
+                         "index must be named 'date'")
+        self.assertNotIn("date", shaped.columns,
+                         "'date' must not also appear as a regular column")
+
+    def test_shape_df_date_index_is_utc(self):
+        """The date index must be a UTC-aware DatetimeTZDtype."""
+        from groai_fi_datastore_shared.Binance.cli.download_price_binance_s3 import _shape_df
+        import pyarrow as pa
+
+        shaped = _shape_df(self._make_raw_klines(), symbol="BTCUSDT", exchange="Binance")
+
+        # Inspect via PyArrow table to check the actual Parquet-level type
+        table = pa.Table.from_pandas(shaped, preserve_index=True)
+        date_type = table.schema.field("date").type
+        self.assertTrue(pa.types.is_timestamp(date_type),
+                        f"date must be a timestamp type, got {date_type}")
+        self.assertEqual(str(date_type.tz), "UTC",
+                         f"date must be UTC-tagged, got tz={date_type.tz}")
+
+    # ------------------------------------------------------------------
+    # Rule 3 — exchange / symbol not in file data
+    # ------------------------------------------------------------------
+
+    def test_shape_df_no_hive_columns(self):
+        """exchange and symbol must not appear as data columns."""
+        from groai_fi_datastore_shared.Binance.cli.download_price_binance_s3 import _shape_df
+
+        shaped = _shape_df(self._make_raw_klines(), symbol="BTCUSDT", exchange="Binance")
+
+        self.assertNotIn("exchange", shaped.columns,
+                         "'exchange' must not be a file data column")
+        self.assertNotIn("symbol", shaped.columns,
+                         "'symbol' must not be a file data column")
+
+    # ------------------------------------------------------------------
+    # Rule 2 — yymm dict-encoded  |  Rule 3 — no exchange/symbol in schema
+    # Rule 1 — date is Parquet index  |  Rule 4 — UTC timezone
+    # (full spec validation via a local temp Parquet file)
+    # ------------------------------------------------------------------
+
+    def test_write_path_produces_spec_compliant_schema(self):
+        """
+        Replicate the write_parquet_to_s3 encoding logic and write to a local
+        temp file, then validate every rule from PRICE_PARQUET_V3_SPEC.md.
+        """
+        import tempfile
+        import pyarrow as pa
+        import pyarrow.compute as pc
+        import pyarrow.parquet as pq
+        from groai_fi_datastore_shared.Binance.cli.download_price_binance_s3 import _shape_df
+
+        shaped = _shape_df(self._make_raw_klines(), symbol="BTCUSDT", exchange="Binance")
+
+        # ── Replicate write_parquet_to_s3 encoding (without the S3 transport) ─
+        working_df = shaped.copy()
+        if "yymm" in working_df.columns:
+            working_df["yymm"] = working_df["yymm"].astype(str)
+
+        table = pa.Table.from_pandas(working_df, preserve_index=True)
+
+        if "yymm" in table.schema.names:
+            idx = table.schema.get_field_index("yymm")
+            yymm_utf8 = table.column("yymm").cast(pa.utf8())
+            encoded   = pc.dictionary_encode(yymm_utf8)
+            table     = table.set_column(idx, pa.field("yymm", encoded.type), encoded)
+
+        with tempfile.NamedTemporaryFile(suffix=".parquet", delete=False) as fh:
+            tmp_path = fh.name
+        try:
+            pq.write_table(table, tmp_path, compression="snappy")
+            schema    = pq.read_schema(tmp_path)
+            field_names = [f.name for f in schema]
+
+            # Rule 3: exchange and symbol NOT in file schema
+            self.assertNotIn("exchange", field_names,
+                             "exchange must not be a file column (Hive path only)")
+            self.assertNotIn("symbol", field_names,
+                             "symbol must not be a file column (Hive path only)")
+
+            # Rule 2: yymm is dictionary-encoded
+            self.assertIn("yymm", field_names, "yymm must be present")
+            yymm_type = schema.field("yymm").type
+            self.assertTrue(pa.types.is_dictionary(yymm_type),
+                            f"yymm must be dictionary-encoded, got {yymm_type}")
+
+            # Rule 1 + Rule 4: date is Parquet-level index, UTC timestamp
+            # When preserve_index=True, 'date' appears in schema.names as the stored field
+            self.assertIn("date", field_names,
+                          "date must be stored as a Parquet field (as the index)")
+            date_type = schema.field("date").type
+            self.assertTrue(pa.types.is_timestamp(date_type),
+                            f"date must be a timestamp type, got {date_type}")
+            self.assertEqual(str(date_type.tz), "UTC",
+                             f"date must be UTC-tagged, got tz={date_type.tz}")
+
+            # Verify pandas metadata marks date as index (not data column)
+            pandas_meta   = schema.pandas_metadata
+            index_columns = pandas_meta.get("index_columns", [])
+            self.assertIn("date", index_columns,
+                          "pandas metadata must mark 'date' as the index column")
+        finally:
+            import os as _os
+            _os.unlink(tmp_path)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Integration tests — require live S3 + Binance API
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -464,13 +604,10 @@ class TestMergeParquetS3(unittest.TestCase):
             pytest.skip("S3_BUCKET_NAME not set — skipping S3 integration tests")
 
     def _upload_synthetic_parts(self, n_parts: int = 3):
-        """Upload n synthetic part files and return total row count."""
-        import duckdb
+        """Upload n spec-compliant synthetic part files and return total row count."""
         from groai_fi_datastore_shared.Binance.cli.s3_utils import (
-            configure_duckdb_s3, get_s3_prefix,
+            get_s3_prefix, write_parquet_to_s3,
         )
-        con       = configure_duckdb_s3(duckdb.connect())
-        prefix    = get_s3_prefix(self.bucket, self.PRICE_ROOT, self.EXCHANGE, self.SYMBOL)
         total_rows = 0
 
         for i in range(n_parts):
@@ -479,16 +616,16 @@ class TestMergeParquetS3(unittest.TestCase):
                 start=datetime.fromtimestamp(base_ts, tz=timezone.utc),
                 periods=60, freq="1min"
             )
+            # Build spec-compliant DataFrame: date as index, no exchange/symbol columns
             df = pd.DataFrame({
-                "date":     dates,
-                "open":     100.0, "high": 101.0, "low": 99.0,
-                "close":    100.5, "volume": 1000.0,
-                "symbol":   self.SYMBOL, "exchange": self.EXCHANGE,
-                "yymm":     dates.strftime("%y%m"),
-            })
-            dest = f"{prefix}/part.{base_ts}.parquet"
-            con.register(f"df_{i}", df)
-            con.execute(f"COPY df_{i} TO '{dest}' (FORMAT PARQUET, COMPRESSION SNAPPY)")
+                "yymm":   dates.strftime("%y%m"),
+                "open":   100.0, "high": 101.0, "low": 99.0,
+                "close":  100.5, "volume": 1000.0,
+            }, index=pd.Index(dates, name="date"))
+
+            prefix = get_s3_prefix(self.bucket, self.PRICE_ROOT, self.EXCHANGE, self.SYMBOL)
+            dest   = f"{prefix}/part.{base_ts}.parquet"
+            write_parquet_to_s3(df, dest)
             total_rows += len(df)
             print(f"  Uploaded part {i+1}: {len(df)} rows → {dest}")
 

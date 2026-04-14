@@ -187,6 +187,71 @@ def delete_s3_prefix(bucket: str, prefix: str) -> int:
     return delete_s3_keys(bucket, keys)
 
 
+# ── Canonical S3 Parquet writer ──────────────────────────────────────────────
+
+def write_parquet_to_s3(df: "pd.DataFrame", s3_path: str) -> None:
+    """
+    Write a price DataFrame to S3 as a price_parquet_v3-compliant Parquet file.
+
+    Enforces the full schema contract (see PRICE_PARQUET_V3_SPEC.md):
+      - ``date`` must already be the DataFrame index (UTC-aware timestamp).
+      - ``yymm`` is dictionary-encoded (BYTE_ARRAY + RLE_DICTIONARY).
+      - ``exchange`` and ``symbol`` must NOT be in df.columns (Hive path encodes them).
+      - Compression: Snappy.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Price data with ``date`` set as the index.  Must not contain
+        ``exchange`` or ``symbol`` columns.
+    s3_path : str
+        Full S3 URI, e.g.
+        ``s3://bucket/prices_v3.parquet/exchange=Binance/symbol=BTCUSDT/part.00000.parquet``
+    """
+    import pandas as pd
+    import pyarrow as pa
+    import pyarrow.compute as pc
+    import pyarrow.parquet as pq
+    import s3fs
+
+    # Guard: confirm spec contract before touching S3
+    assert df.index.name == "date", (
+        f"write_parquet_to_s3: DataFrame index must be named 'date', "
+        f"got '{df.index.name}'. Call df.set_index('date') first."
+    )
+    for hive_col in ("exchange", "symbol"):
+        assert hive_col not in df.columns, (
+            f"write_parquet_to_s3: '{hive_col}' must NOT be a file column "
+            f"(it belongs in the Hive S3 path). Drop it before writing."
+        )
+
+    # Normalise yymm to plain str so PyArrow encodes it as utf8 not large_string
+    working_df = df.copy()
+    if "yymm" in working_df.columns:
+        working_df["yymm"] = working_df["yymm"].astype(str)
+
+    # Build PyArrow table — preserve_index=True stores date as a Parquet column
+    # with pandas index metadata so readers restore it as the index automatically
+    table = pa.Table.from_pandas(working_df, preserve_index=True)
+
+    # Dictionary-encode yymm (low-cardinality column — dramatically reduces file size)
+    if "yymm" in table.schema.names:
+        idx = table.schema.get_field_index("yymm")
+        yymm_utf8 = table.column("yymm").cast(pa.utf8())   # utf8 not large_string
+        encoded = pc.dictionary_encode(yymm_utf8)
+        table = table.set_column(idx, pa.field("yymm", encoded.type), encoded)
+
+    fs = s3fs.S3FileSystem(
+        endpoint_url=os.environ["S3_ENDPOINT_URL"],
+        key=os.environ["S3_ACCESS_KEY_ID"],
+        secret=os.environ["S3_SECRET_ACCESS_KEY"],
+    )
+
+    # s3fs expects bucket/key — strip the s3:// scheme
+    path = s3_path.removeprefix("s3://")
+    pq.write_table(table, path, filesystem=fs, compression="snappy")
+
+
 # ── Internal ─────────────────────────────────────────────────────────────────
 
 def _boto3_client():

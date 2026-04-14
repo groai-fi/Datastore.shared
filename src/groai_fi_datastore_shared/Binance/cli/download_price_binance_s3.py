@@ -43,6 +43,7 @@ from groai_fi_datastore_shared.Binance.cli.s3_utils import (
     get_s3_prefix,
     get_s3_glob,
     get_max_date_s3,
+    write_parquet_to_s3,
 )
 
 
@@ -72,33 +73,53 @@ def parse_arguments():
 
 def _shape_df(df: pd.DataFrame, symbol: str, exchange: str) -> pd.DataFrame:
     """
-    Trim the raw klines DataFrame to the canonical price schema and add
-    the metadata columns required by the parquet layout.
+    Trim the raw klines DataFrame to the canonical price_parquet_v3 schema.
+
+    Conforms to PRICE_PARQUET_V3_SPEC.md:
+      - ``date`` is set as the DataFrame index (UTC-aware timestamp).
+      - ``exchange`` and ``symbol`` are NOT added as columns — they belong in the
+        Hive S3 path and are reconstructed by readers at read time.
+      - ``yymm`` is retained as a data column (dict-encoded by write_parquet_to_s3).
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Raw klines as returned by download_data_from_binance_1minute.  The first
+        six columns must be: date, open, high, low, close, volume.
+    symbol : str
+        Trading symbol — kept for backward-compat signature; NOT written to file.
+    exchange : str
+        Exchange name — kept for backward-compat signature; NOT written to file.
     """
     df = df.iloc[:, :6].copy()
     df.columns = schema.price_columns      # date, open, high, low, close, volume
 
-    # The Binance API may return dates as integer ms timestamps or already-formatted
-    # strings. Handle both cases gracefully.
+    # Parse date — handle integer ms timestamps or already-parsed datetimes
     if not pd.api.types.is_datetime64_any_dtype(df["date"]):
         first_val = df["date"].iloc[0] if len(df) > 0 else None
         try:
-            first_val_numeric = float(first_val)  # will succeed for int/float ms values
+            float(first_val)  # succeeds for int/float ms values
             df["date"] = pd.to_datetime(df["date"].astype(float), unit="ms", utc=True)
         except (TypeError, ValueError):
             # Already a string datetime — parse directly
             df["date"] = pd.to_datetime(df["date"], utc=True)
+    elif df["date"].dt.tz is None:
+        # Already datetime but naive — tag as UTC
+        df["date"] = df["date"].dt.tz_localize("UTC")
 
-    df["symbol"] = symbol
-    df["exchange"] = exchange
     df["yymm"] = df["date"].dt.strftime("%y%m")
 
+    # Apply dtype casts for data columns only (skip Hive partition columns)
+    skip = {"date"} | set(schema.price_parquet_hive_columns)
     for col, dtype in schema.price_parquet.items():
-        if col in df.columns and col != "date":
+        if col not in skip and col in df.columns:
             df[col] = df[col].astype(dtype)
 
-    df = df[[c for c in schema.price_header_parquet if c in df.columns]]
-    df = df.drop_duplicates(subset=["date"]).sort_values("date").reset_index(drop=True)
+    # Select canonical file columns, deduplicate on date, sort, then set as index
+    file_cols = ["date"] + schema.price_parquet_file_columns
+    df = df[[c for c in file_cols if c in df.columns]]
+    df = df.drop_duplicates(subset=["date"]).sort_values("date")
+    df = df.set_index("date")   # date becomes the Parquet row-group index
     return df
 
 
@@ -163,10 +184,7 @@ def run_for_symbol(
 
     ts = int(time.time())
     s3_dest = f"{s3_prefix}/part.{ts}.parquet"
-    con.register("df_view", df)
-    con.execute(
-        f"COPY df_view TO '{s3_dest}' (FORMAT PARQUET, COMPRESSION SNAPPY)"
-    )
+    write_parquet_to_s3(df, s3_dest)
     print(f"  [{symbol}] Uploaded {row_count} rows → {s3_dest}")
     return row_count
 

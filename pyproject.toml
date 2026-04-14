@@ -32,6 +32,7 @@ dependencies = [
     "python-dateutil>=2.8.2",
     "duckdb>=0.10.0",
     "boto3>=1.26.0",
+    "s3fs>=2023.6.0",
     "joblib>=1.2.0",
 ]
 
@@ -53,6 +54,7 @@ binance-merge-parquet-s3  = "groai_fi_datastore_shared.Binance.cli.merge_parquet
 binance-auto-update-s3    = "groai_fi_datastore_shared.Binance.cli.auto_update_prices_s3:main"
 binance-list-symbols-s3   = "groai_fi_datastore_shared.Binance.cli.list_symbols_s3:run"
 binance-remove-symbol-s3  = "groai_fi_datastore_shared.Binance.cli.remove_symbol_s3:run"
+binance-backfill-fix-s3   = "groai_fi_datastore_shared.Binance.cli.backfill_fix_s3:run"
 
 [project.urls]
 Homepage   = "https://github.com/groai-fi/datastore.shared"
